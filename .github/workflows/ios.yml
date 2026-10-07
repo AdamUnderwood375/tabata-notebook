@@ -1,0 +1,19 @@
+name: ios
+on: [workflow_dispatch]
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: 24, cache: npm}
+      - run: npm ci || npm install
+      - run: npx expo prebuild --platform ios --non-interactive
+      - run: |
+          cd ios
+          pod install --repo-update
+          xcodebuild -workspace TabataNotebook.xcworkspace -scheme "TabataNotebook" -sdk iphoneos -configuration Release archive -archivePath $RUNNER_TEMP/app.xcarchive CODE_SIGNING_ALLOWED=NO
+          mkdir -p Payload && cp -R $RUNNER_TEMP/app.xcarchive/Products/Applications/*.app Payload/
+          zip -r $RUNNER_TEMP/unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with: {name: unsigned-ipa, path: '${{ runner.temp }}/unsigned.ipa', if-no-files-found: error}
