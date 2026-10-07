@@ -7,11 +7,6 @@
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0f1115"
-    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.adamunderwood375.tabatanotebook",
@@ -34,8 +29,23 @@
     },
     "plugins": [
       "expo-router",
-      ["expo-audio", { "microphonePermission": false, "enableBackgroundPlayback": false }],
-      "expo-notifications"
+      [
+        "expo-audio",
+        {
+          "microphonePermission": false,
+          "enableBackgroundPlayback": false
+        }
+      ],
+      "expo-notifications",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#0f1115"
+        }
+      ]
     ]
   }
 }
