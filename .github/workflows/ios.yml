@@ -22,7 +22,8 @@ jobs:
     name: Build unsigned IPA
     # SDK 57 pods use iOS-26-only symbols (expo-notifications, expo-router,
     # expo-modules-core), so the macOS 15 default Xcode 16.4 cannot compile them.
-    # Xcode 26.3 rejects expo-modules-jsi's RuntimeScheduler.h (SWIFT_RETURNS_RETAINED on a ctor); 26.2 compiles it.
+    # Xcode 26.3 rejects expo-modules-jsi's RuntimeScheduler.h (SWIFT_RETURNS_RETAINED on a ctor),
+    # and so does 26.2; patches/expo-modules-jsi+57.1.1.patch (expo/expo#51040) fixes both ctors.
     runs-on: macos-15
     timeout-minutes: 60
     steps:
