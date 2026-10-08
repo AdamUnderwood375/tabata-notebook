@@ -14,9 +14,6 @@ permissions:
   contents: write
 
 env:
-  ARCHIVE_PATH: ${{ runner.temp }}/app.xcarchive
-  IPA_PATH: ${{ runner.temp }}/tabata-notebook-unsigned.ipa
-  XCODEBUILD_LOG: ${{ runner.temp }}/xcodebuild.log
   EXPO_NO_TELEMETRY: '1'
   CI: '1'
 
@@ -31,6 +28,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Set paths
+        run: |
+          {
+            echo "ARCHIVE_PATH=$RUNNER_TEMP/app.xcarchive"
+            echo "IPA_PATH=$RUNNER_TEMP/tabata-notebook-unsigned.ipa"
+            echo "XCODEBUILD_LOG=$RUNNER_TEMP/xcodebuild.log"
+          } >> "$GITHUB_ENV"
 
       - name: Select Xcode
         run: |
