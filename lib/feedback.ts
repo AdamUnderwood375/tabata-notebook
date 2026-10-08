@@ -1,5 +1,5 @@
 // Beep + haptic cues for phase transitions. Loud, distinct, and audible in silent mode.
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import * as Haptics from 'expo-haptics';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
@@ -16,7 +16,11 @@ const SOURCES: Record<Cue, number> = {
 export function useCues(opts: { sound: boolean; haptics: boolean }) {
   const players = useRef<Partial<Record<Cue, AudioPlayer>>>({});
   const optsRef = useRef(opts);
-  optsRef.current = opts;
+
+  // Layout effect, no deps: ref is current before any effect/timer fires after a commit.
+  useLayoutEffect(() => {
+    optsRef.current = opts;
+  });
 
   useEffect(() => {
     // Beep even with the ringer switch off; duck (not stop) the user's music/podcast.
@@ -48,8 +52,14 @@ export function useCues(opts: { sound: boolean; haptics: boolean }) {
     if (opts.sound) {
       const pl = players.current[kind];
       if (pl) try {
-        pl.seekTo(0).catch(() => {});
-        pl.play();
+        // Rewind first: playing mid-buffer would replay a truncated beep.
+        pl.seekTo(0)
+          .then(() => pl.play())
+          .catch(() => {
+            try {
+              pl.play();
+            } catch {}
+          });
       } catch {}
     }
     if (opts.haptics && Platform.OS !== 'web') {

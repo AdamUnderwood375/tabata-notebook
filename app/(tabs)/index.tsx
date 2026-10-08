@@ -56,34 +56,44 @@ export default function WorkoutList() {
         renderItem={({ item: t }) => {
           const badge = scheduleLabel(t.schedule);
           return (
-            <Pressable
-              style={({ pressed }) => [s.row, pressed && { backgroundColor: C.cardHi }]}
-              onPress={() => router.push(`/workout/${t.id}`)}
-              onLongPress={() => setMenuFor(t)}
-              delayLongPress={350}
-            >
-              <View style={{ flex: 1, gap: 4 }}>
-                <Text style={s.name} numberOfLines={1}>
-                  {t.name}
-                </Text>
-                <Text style={s.meta}>
-                  {t.exercises.length} exercise{t.exercises.length === 1 ? '' : 's'} · {formatDuration(totalSec(t))}
-                </Text>
-                <View style={s.badges}>
-                  {badge ? (
-                    <View style={s.badge}>
-                      <Ionicons name="alarm-outline" size={12} color={C.prepare} />
-                      <Text style={[s.badgeText, { color: C.prepare }]}>{badge}</Text>
-                    </View>
-                  ) : null}
-                  <Text style={s.last}>Last done: {relativeDay(t.lastDoneAt)}</Text>
+            <View style={s.row}>
+              {/* The whole left block opens the workout; the menu button is a sibling so its tap never
+                  bubbles into the row's navigation. */}
+              <Pressable
+                style={({ pressed }) => [s.rowMain, pressed && { opacity: 0.6 }]}
+                onPress={() => router.push(`/workout/${t.id}`)}
+                onLongPress={() => setMenuFor(t)}
+                delayLongPress={350}
+              >
+                <View style={{ flex: 1, gap: 4 }}>
+                  <Text style={s.name} numberOfLines={1}>
+                    {t.name}
+                  </Text>
+                  <Text style={s.meta}>
+                    {t.exercises.length} exercise{t.exercises.length === 1 ? '' : 's'} · {formatDuration(totalSec(t))}
+                  </Text>
+                  <View style={s.badges}>
+                    {badge ? (
+                      <View style={s.badge}>
+                        <Ionicons name="alarm-outline" size={12} color={C.prepare} />
+                        <Text style={[s.badgeText, { color: C.prepare }]}>{badge}</Text>
+                      </View>
+                    ) : null}
+                    <Text style={s.last}>Last done: {relativeDay(t.lastDoneAt)}</Text>
+                  </View>
                 </View>
-              </View>
-              <Pressable hitSlop={10} onPress={() => setMenuFor(t)} accessibilityLabel={`${t.name} options`}>
+                <Ionicons name="play-circle" size={36} color={C.accent} />
+              </Pressable>
+              <Pressable
+                hitSlop={10}
+                onPress={() => setMenuFor(t)}
+                accessibilityRole="button"
+                accessibilityLabel={`${t.name} options`}
+                style={s.menuBtn}
+              >
                 <Ionicons name="ellipsis-horizontal" size={20} color={C.dim} />
               </Pressable>
-              <Ionicons name="play-circle" size={36} color={C.accent} />
-            </Pressable>
+            </View>
           );
         }}
       />
@@ -167,10 +177,12 @@ const s = StyleSheet.create({
     gap: 14,
     backgroundColor: C.card,
     borderRadius: 14,
-    padding: 14,
+    paddingRight: 14,
     borderWidth: StyleSheet.hairlineWidth,
     borderColor: C.border,
   },
+  rowMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 14, padding: 14 },
+  menuBtn: { padding: 12 }, // 20px glyph + padding = 44x44 touch target
   name: { color: C.text, fontSize: 18, fontWeight: '700' },
   meta: { color: C.dim, fontSize: 14 },
   badges: { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' },

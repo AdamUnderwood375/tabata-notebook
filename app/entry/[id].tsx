@@ -10,8 +10,14 @@ import type { Entry } from '@/lib/types';
 
 type Draft = Pick<Entry, 'qWhat' | 'qHowStars' | 'qHowNotes'>;
 
+/** Standard iOS header height — keep lifted content clear of it. */
+const HEADER_HEIGHT = Platform.OS === 'ios' ? 44 : 0;
+
 export default function EntryScreen() {
-  const { id, fresh } = useLocalSearchParams<{ id: string; fresh?: string }>();
+  // expo-router can hand back a repeated param as an array; the id is single-valued.
+  const params = useLocalSearchParams<{ id?: string | string[]; fresh?: string | string[] }>();
+  const id = (Array.isArray(params.id) ? params.id[0] : params.id) ?? '';
+  const fresh = Array.isArray(params.fresh) ? params.fresh[0] : params.fresh;
   const { getEntry, getTemplate, updateEntry, deleteEntry } = useStore();
   const entry = getEntry(id);
   const template = entry ? getTemplate(entry.templateId) : undefined;
@@ -35,8 +41,11 @@ export default function EntryScreen() {
       setSaved(true);
     }
   };
+  // Refs may only be written outside render; keep the cleanup effect pointing at the latest flush.
   const flushRef = useRef(flush);
-  flushRef.current = flush;
+  useEffect(() => {
+    flushRef.current = flush;
+  });
   useEffect(() => () => flushRef.current(), []);
 
   const change = (p: Partial<Draft>, immediate = false) => {
@@ -61,6 +70,7 @@ export default function EntryScreen() {
 
   const started = new Date(entry.startedAt);
   const isFresh = fresh === '1';
+  const goBack = () => (router.canGoBack() ? router.back() : router.replace('/'));
 
   const repeat = () => {
     flush();
@@ -68,14 +78,20 @@ export default function EntryScreen() {
   };
   const remove = async () => {
     if (await confirm('Delete entry?', 'This removes it from your notebook.', 'Delete', true)) {
+      if (timer.current) clearTimeout(timer.current);
+      timer.current = null;
       pending.current = null;
       deleteEntry(entry.id);
-      router.back();
+      goBack();
     }
   };
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={HEADER_HEIGHT}
+    >
       <Stack.Screen
         options={{
           title: isFresh ? (entry.completed ? 'Nice work' : 'Logged') : 'Entry',
@@ -147,7 +163,7 @@ export default function EntryScreen() {
         </View>
 
         {isFresh ? (
-          <Pressable style={s.doneBtn} onPress={() => (flush(), router.back())}>
+          <Pressable style={s.doneBtn} onPress={() => (flush(), goBack())}>
             <Text style={s.doneText}>Done</Text>
           </Pressable>
         ) : null}

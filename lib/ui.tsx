@@ -69,7 +69,7 @@ export function Stepper({
   step?: number;
   suffix?: string;
 }) {
-  const clamp = (v: number) => Math.max(min, Math.min(max, v));
+  const clamp = (v: number) => (Number.isFinite(v) ? Math.max(min, Math.min(max, v)) : min);
   return (
     <View style={st.stepper}>
       <Pressable style={st.stepBtn} hitSlop={4} onPress={() => onChange(clamp(value - step))}>
@@ -82,7 +82,7 @@ export function Stepper({
         selectTextOnFocus
         onChangeText={(s) => {
           const n = parseInt(s.replace(/\D/g, ''), 10);
-          onChange(clamp(Number.isFinite(n) ? n : min));
+          onChange(clamp(n));
         }}
       />
       {suffix ? <Text style={st.suffix}>{suffix}</Text> : null}

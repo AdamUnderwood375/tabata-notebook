@@ -1,19 +1,132 @@
 name: ios
-on: [workflow_dispatch]
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ios-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  ARCHIVE_PATH: ${{ runner.temp }}/app.xcarchive
+  IPA_PATH: ${{ runner.temp }}/tabata-notebook-unsigned.ipa
+  XCODEBUILD_LOG: ${{ runner.temp }}/xcodebuild.log
+  EXPO_NO_TELEMETRY: '1'
+  CI: '1'
+
 jobs:
   build:
-    runs-on: macos-latest
+    name: Build unsigned IPA
+    # SDK 57 pods use iOS-26-only symbols (expo-notifications, expo-router,
+    # expo-modules-core), so the macOS 15 default Xcode 16.4 cannot compile them.
+    # Xcode 26.3 is the highest 26.x installed on macos-15.
+    runs-on: macos-15
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: {node-version: 24, cache: npm}
-      - run: npm ci || npm install
-      - run: npx expo prebuild --platform ios --non-interactive
-      - run: |
-          cd ios
-          pod install --repo-update
-          xcodebuild -workspace TabataNotebook.xcworkspace -scheme "TabataNotebook" -sdk iphoneos -configuration Release archive -archivePath $RUNNER_TEMP/app.xcarchive CODE_SIGNING_ALLOWED=NO
-          mkdir -p Payload && cp -R $RUNNER_TEMP/app.xcarchive/Products/Applications/*.app Payload/
-          zip -r $RUNNER_TEMP/unsigned.ipa Payload
-      - uses: actions/upload-artifact@v4
-        with: {name: unsigned-ipa, path: '${{ runner.temp }}/unsigned.ipa', if-no-files-found: error}
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          set -euo pipefail
+          sudo xcode-select -s /Applications/Xcode_26.3.app
+          xcodebuild -version
+          xcodebuild -showsdks
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # prebuild also runs `pod install` for the ios platform (no --no-install), so
+      # pods are already installed by the time we reach xcodebuild.
+      - name: Prebuild iOS project
+        run: npx expo prebuild --platform ios --non-interactive
+
+      - name: Discover workspace and scheme
+        id: discover
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          workspaces=(ios/*.xcworkspace)
+          if [ "${#workspaces[@]}" -ne 1 ]; then
+            echo "expected exactly one ios/*.xcworkspace, found ${#workspaces[@]}" >&2
+            ls -la ios >&2
+            exit 1
+          fi
+          WORKSPACE="${workspaces[0]}"
+          SCHEME=$(xcodebuild -list -json -workspace "$WORKSPACE" | python3 -c "import json,sys; s=[x for x in json.load(sys.stdin).get('workspace',{}).get('schemes',[]) if not x.startswith('Pods')]; print(s[0] if s else '')")
+          test -n "$SCHEME"
+          echo "workspace=$WORKSPACE" >> "$GITHUB_OUTPUT"
+          echo "scheme=$SCHEME" >> "$GITHUB_OUTPUT"
+          echo "workspace: $WORKSPACE"
+          echo "scheme: $SCHEME"
+
+      - name: Archive (unsigned)
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -workspace "${{ steps.discover.outputs.workspace }}" \
+            -scheme "${{ steps.discover.outputs.scheme }}" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$ARCHIVE_PATH" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY='' \
+            archive 2>&1 | tee "$XCODEBUILD_LOG"
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP=$(find "$ARCHIVE_PATH/Products/Applications" -maxdepth 1 -name '*.app' -print -quit)
+          test -n "$APP"
+          STAGE="$RUNNER_TEMP/ipa"
+          rm -rf "$STAGE"
+          mkdir -p "$STAGE/Payload"
+          # ditto keeps symlinks inside .app bundles intact; plain cp would break them
+          ditto "$APP" "$STAGE/Payload/$(basename "$APP")"
+          cd "$STAGE"
+          zip -qry "$IPA_PATH" Payload
+          echo "packaged $IPA_PATH"
+          ls -l "$IPA_PATH"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tabata-notebook-unsigned-ipa
+          path: ${{ env.IPA_PATH }}
+          if-no-files-found: error
+
+      - name: Upload xcodebuild log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: ${{ env.XCODEBUILD_LOG }}
+          if-no-files-found: warn
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: build-${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$IPA_PATH" --clobber
+          else
+            gh release create "$TAG" "$IPA_PATH" \
+              --title "Tabata Notebook unsigned IPA (build ${{ github.run_number }})" \
+              --notes "Unsigned IPA from ${{ github.sha }} (Expo SDK 57 / RN 0.86, Xcode 26.3, Node 22). Re-sign with a free Apple ID before sideloading; not App Store ready." \
+              --target "${{ github.sha }}"
+          fi

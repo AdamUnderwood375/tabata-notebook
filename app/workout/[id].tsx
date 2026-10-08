@@ -37,7 +37,10 @@ const PHASE_LABEL: Record<Phase['kind'], string> = {
 const KEEP_AWAKE_TAG = 'runner';
 
 export default function Runner() {
-  const { id, ready } = useLocalSearchParams<{ id: string; ready?: string }>();
+  // expo-router can hand back a repeated param as an array; both are single-valued.
+  const params = useLocalSearchParams<{ id?: string | string[]; ready?: string | string[] }>();
+  const id = (Array.isArray(params.id) ? params.id[0] : params.id) ?? '';
+  const ready = Array.isArray(params.ready) ? params.ready[0] : params.ready;
   const { getTemplate, settings, addEntry } = useStore();
   const template = getTemplate(id);
   const phases = useMemo(() => (template ? buildPhases(template) : []), [template?.id]); // freeze for this run
@@ -45,34 +48,43 @@ export default function Runner() {
 
   const [status, setStatus] = useState<Status>(ready === '1' ? 'ready' : 'running');
   const [idx, setIdx] = useState(0);
-  const [now, setNow] = useState(Date.now());
+  // Remaining time of the current phase, driven by the tick (wall clock) and frozen while paused.
+  const [leftMs, setLeftMs] = useState(0);
 
   // Mutable timing state lives in refs so the interval never sees stale values.
   const endsAt = useRef(0); // ms epoch when current phase ends (running)
-  const remainingMs = useRef(0); // when paused
+  // Synchronous mirror of leftMs — state can be stale after pause() + await confirm.
+  const leftRef = useRef(0);
   const startedAt = useRef<string | null>(null);
   const workMs = useRef(0); // active time spent outside 'prepare' (excludes paused time)
   const lastTick = useRef(0);
   const lastSecShown = useRef<number | null>(null);
   const finished = useRef(false);
   const idxRef = useRef(0);
-  const statusRef = useRef<Status>(status);
-  statusRef.current = status;
+  const isDone = status === 'done';
 
   // ---- keep awake ----
   useEffect(() => {
-    if (!settings.keepAwake || status === 'done') return;
-    activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => {});
+    if (!settings.keepAwake || isDone) return;
+    let cancelled = false;
+    const on = activateKeepAwakeAsync(KEEP_AWAKE_TAG).catch(() => {});
     return () => {
+      cancelled = true;
+      on.then(() => {
+        // activate may still have been in flight — don't leave the screen awake.
+        if (cancelled) deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => {});
+      });
       deactivateKeepAwake(KEEP_AWAKE_TAG).catch(() => {});
     };
-  }, [settings.keepAwake, status === 'done']);
+  }, [settings.keepAwake, isDone]);
 
   const enterPhase = useCallback(
     (i: number, at: number) => {
       idxRef.current = i;
       setIdx(i);
       endsAt.current = at + phases[i].durationSec * 1000;
+      leftRef.current = Math.max(0, endsAt.current - Date.now());
+      setLeftMs(leftRef.current);
       lastSecShown.current = phases[i].durationSec;
       const k = phases[i].kind;
       cue(k === 'work' ? 'work' : k === 'prepare' ? 'tick' : 'rest');
@@ -151,34 +163,38 @@ export default function Runner() {
           if (secLeft <= 3 && secLeft >= 1 && secLeft < phases[i].durationSec) cue('tick');
         }
       }
-      setNow(t);
+      leftRef.current = Math.max(0, end - t);
+      setLeftMs(leftRef.current);
     }, 100);
     return () => clearInterval(h);
   }, [status, phases, enterPhase, finish, cue]);
 
   // ---- controls ----
+  // Full-screen modal with gestures off: there may be no back stack to pop.
+  const goBack = () => (router.canGoBack() ? router.back() : router.replace('/'));
+
   const pause = () => {
-    remainingMs.current = Math.max(0, endsAt.current - Date.now());
+    if (finished.current) return;
+    leftRef.current = Math.max(0, endsAt.current - Date.now());
+    setLeftMs(leftRef.current);
     setStatus('paused');
   };
   const resume = () => {
+    if (finished.current) return;
     const t = Date.now();
-    endsAt.current = t + remainingMs.current;
+    endsAt.current = t + leftRef.current;
     lastTick.current = t;
-    setNow(t);
     setStatus('running');
   };
   const jumpTo = (j: number) => {
+    if (finished.current) return;
     if (j < 0) return finish(true);
-    const t = Date.now();
-    enterPhase(j, t);
-    if (statusRef.current === 'paused') remainingMs.current = phases[j].durationSec * 1000;
-    setNow(t);
+    enterPhase(j, Date.now());
   };
   const exit = async () => {
-    if (status === 'ready' || !startedAt.current) return router.back();
+    if (status === 'ready' || !startedAt.current) return goBack();
     const neverWorked = workMs.current < 1000;
-    const wasRunning = statusRef.current === 'running';
+    const wasRunning = status === 'running';
     if (wasRunning) pause();
     const ok = await confirm(
       'End workout?',
@@ -192,7 +208,7 @@ export default function Runner() {
     }
     if (neverWorked) {
       finished.current = true;
-      router.back();
+      goBack();
     } else finish(false);
   };
 
@@ -201,7 +217,7 @@ export default function Runner() {
     return (
       <SafeAreaView style={[s.screen, { alignItems: 'center', justifyContent: 'center', gap: 16 }]}>
         <Text style={s.title}>{template ? 'This workout has no exercises' : 'Workout not found'}</Text>
-        <Pressable style={s.bigBtn} onPress={() => router.back()}>
+        <Pressable style={s.bigBtn} onPress={goBack}>
           <Text style={s.bigBtnText}>Close</Text>
         </Pressable>
       </SafeAreaView>
@@ -211,7 +227,7 @@ export default function Runner() {
   if (status === 'ready') {
     return (
       <SafeAreaView style={[s.screen, { justifyContent: 'space-between' }]}>
-        <TopBar onExit={() => router.back()} />
+        <TopBar onExit={goBack} />
         <View style={{ alignItems: 'center', gap: 10, paddingHorizontal: 24 }}>
           <Text style={s.title}>{template.name}</Text>
           <Text style={s.dim}>
@@ -237,7 +253,6 @@ export default function Runner() {
   const phase = phases[idx];
   const color = PHASE_COLOR[phase.kind];
   const paused = status === 'paused';
-  const leftMs = paused ? remainingMs.current : Math.max(0, endsAt.current - now);
   const progress = 1 - leftMs / (phase.durationSec * 1000);
   const exercise = template.exercises[phase.exerciseIndex];
   const nextPhase = phases[idx + 1];

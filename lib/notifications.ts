@@ -42,23 +42,30 @@ export function remindersSignature(templates: WorkoutTemplate[]): string {
   );
 }
 
-let queue: Promise<unknown> = Promise.resolve();
+let queue: Promise<boolean> = Promise.resolve(true);
 
 /**
  * Cancel everything we scheduled and re-create one WEEKLY trigger per (template, weekday).
  * Serialized so rapid edits can't interleave cancel/schedule and create duplicates.
  * iOS caps pending local notifications at 64 → ~9 templates scheduled every day.
  */
-export function syncReminders(templates: WorkoutTemplate[]): Promise<unknown> {
-  if (!supported) return Promise.resolve();
+/**
+ * Resolves true when the desired reminders are in place (or there was nothing to do),
+ * false when permission was refused / scheduling failed — the caller may retry later.
+ */
+export function syncReminders(templates: WorkoutTemplate[]): Promise<boolean> {
+  if (!supported) return Promise.resolve(true); // no OS notifications here; nothing pending
   queue = queue
     .catch(() => {})
     .then(async () => {
       const scheduled = templates.filter((t) => t.schedule && t.schedule.days.length > 0);
+      // Permission first: if we can't (re-)ask for it we must keep the reminders we already have.
+      if (scheduled.length > 0) {
+        const perm = await Notifications.getPermissionsAsync();
+        if (!perm.granted && !(await ensurePermission())) return false;
+      }
       await Notifications.cancelAllScheduledNotificationsAsync();
-      if (scheduled.length === 0) return;
-      const perm = await Notifications.getPermissionsAsync();
-      if (!perm.granted && !(await ensurePermission())) return;
+      if (scheduled.length === 0) return true;
       for (const t of scheduled) {
         const { hour, minute } = parseTime(t.schedule!.time);
         for (const day of t.schedule!.days) {
@@ -79,7 +86,11 @@ export function syncReminders(templates: WorkoutTemplate[]): Promise<unknown> {
           });
         }
       }
+      return true;
     })
-    .catch((e) => console.warn('syncReminders failed', e));
+    .catch((e) => {
+      console.warn('syncReminders failed', e);
+      return false;
+    });
   return queue;
 }

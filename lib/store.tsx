@@ -1,7 +1,7 @@
 // One Context + AsyncStorage. Hydrate once, write-through on every change.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { DEFAULT_SETTINGS, type Entry, type Settings, type WorkoutTemplate } from './types';
+import { DEFAULT_SETTINGS, type Entry, type Schedule, type Settings, type WorkoutTemplate } from './types';
 import { remindersSignature, syncReminders } from './notifications';
 
 const K = {
@@ -38,9 +38,50 @@ async function load<T>(key: string, fallback: T): Promise<T> {
   try {
     const raw = await AsyncStorage.getItem(key);
     return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
+  } catch (err) {
+    console.warn(`[store] load ${key} failed, using fallback`, err);
     return fallback;
   }
+}
+
+const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** Corrupt schedules become null rather than crashing the schedule helpers. */
+function sanitizeSchedule(v: unknown): Schedule | null {
+  if (!isObj(v) || !Array.isArray(v.days) || typeof v.time !== 'string') return null;
+  const days = v.days.filter((d): d is number => typeof d === 'number' && d >= 0 && d <= 6);
+  return { days, time: v.time };
+}
+
+function sanitizeTemplates(v: unknown): WorkoutTemplate[] {
+  if (!Array.isArray(v)) return [];
+  const out: WorkoutTemplate[] = [];
+  for (const raw of v) {
+    if (!isObj(raw) || typeof raw.id !== 'string' || !raw.id) continue;
+    out.push({
+      ...(raw as unknown as WorkoutTemplate),
+      // Missing/non-array exercises -> empty list, template is still worth keeping.
+      exercises: (Array.isArray(raw.exercises) ? raw.exercises : []).filter(isObj) as WorkoutTemplate['exercises'],
+      schedule: sanitizeSchedule(raw.schedule),
+    });
+  }
+  return out;
+}
+
+/** Newest first; startedAt may be missing or non-string in corrupt data. */
+function sanitizeEntries(v: unknown): Entry[] {
+  if (!Array.isArray(v)) return [];
+  return v
+    .filter((raw): raw is Entry => isObj(raw) && typeof raw.id === 'string' && !!raw.id)
+    .sort((a, b) => String(b.startedAt ?? '').localeCompare(String(a.startedAt ?? '')));
+}
+
+function sanitizeSettings(v: unknown): Settings {
+  return { ...DEFAULT_SETTINGS, ...(isObj(v) ? v : {}) };
+}
+
+function persist(key: string, value: unknown): void {
+  AsyncStorage.setItem(key, JSON.stringify(value)).catch((err) => console.warn(`[store] save ${key} failed`, err));
 }
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -52,27 +93,35 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // ---- hydrate ----
   useEffect(() => {
     (async () => {
-      const [t, e, s] = await Promise.all([
-        load<WorkoutTemplate[]>(K.templates, []),
-        load<Entry[]>(K.entries, []),
-        load<Partial<Settings>>(K.settings, {}),
-      ]);
-      setTemplates(Array.isArray(t) ? t : []);
-      setEntries(Array.isArray(e) ? [...e].sort((a, b) => b.startedAt.localeCompare(a.startedAt)) : []);
-      setSettings({ ...DEFAULT_SETTINGS, ...s });
-      setReady(true);
+      try {
+        const [t, e, s] = await Promise.all([
+          load<unknown>(K.templates, []),
+          load<unknown>(K.entries, []),
+          load<unknown>(K.settings, {}),
+        ]);
+        setTemplates(sanitizeTemplates(t));
+        setEntries(sanitizeEntries(e));
+        setSettings(sanitizeSettings(s));
+      } catch (err) {
+        console.warn('[store] hydration failed, resetting to defaults', err);
+        setTemplates([]);
+        setEntries([]);
+        setSettings({ ...DEFAULT_SETTINGS });
+      } finally {
+        setReady(true);
+      }
     })();
   }, []);
 
   // ---- persist (write-through after hydration) ----
   useEffect(() => {
-    if (ready) AsyncStorage.setItem(K.templates, JSON.stringify(templates)).catch(() => {});
+    if (ready) persist(K.templates, templates);
   }, [ready, templates]);
   useEffect(() => {
-    if (ready) AsyncStorage.setItem(K.entries, JSON.stringify(entries)).catch(() => {});
+    if (ready) persist(K.entries, entries);
   }, [ready, entries]);
   useEffect(() => {
-    if (ready) AsyncStorage.setItem(K.settings, JSON.stringify(settings)).catch(() => {});
+    if (ready) persist(K.settings, settings);
   }, [ready, settings]);
 
   // ---- keep OS reminders in sync with template schedules ----
@@ -81,8 +130,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (!ready) return;
     const sig = remindersSignature(templates);
     if (sig === lastSig.current) return; // lastDoneAt changes etc. don't reschedule
-    lastSig.current = sig;
-    syncReminders(templates);
+    syncReminders(templates).then((applied) => {
+      // Only latch when the schedule actually landed, else a denied permission
+      // would freeze the sig and we'd never retry after it's granted.
+      if (applied) lastSig.current = sig;
+    });
   }, [ready, templates]);
 
   const getTemplate = useCallback((id: string) => templates.find((t) => t.id === id), [templates]);
@@ -112,6 +164,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       };
       setTemplates((prev) => {
         const i = prev.findIndex((t) => t.id === id);
+        if (i === -1) return prev;
         const next = [...prev];
         next.splice(i + 1, 0, copy);
         return next;
@@ -145,8 +198,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const wipeAll = useCallback(async () => {
     setTemplates([]);
     setEntries([]);
-    setSettings(DEFAULT_SETTINGS);
-    await AsyncStorage.multiRemove(Object.values(K));
+    setSettings({ ...DEFAULT_SETTINGS });
+    try {
+      await AsyncStorage.multiRemove(Object.values(K));
+    } catch (err) {
+      console.warn('[store] wipeAll failed to clear storage', err);
+    }
   }, []);
 
   const exportJson = useCallback(

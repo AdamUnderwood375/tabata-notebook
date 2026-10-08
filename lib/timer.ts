@@ -21,19 +21,22 @@ export const PREPARE_SEC = 3;
  */
 export function buildPhases(t: WorkoutTemplate, prepareSec = PREPARE_SEC): Phase[] {
   const out: Phase[] = [];
-  const ex = t.exercises.filter((e) => e.workSec > 0 && e.rounds > 0);
+  if (!t || !Array.isArray(t.exercises)) return out;
+  // keep the index into t.exercises so exerciseIndex still points at the original list
+  const ex = t.exercises
+    .map((e, index) => ({ e, index }))
+    .filter(({ e }) => !!e && e.workSec > 0 && e.rounds > 0);
   if (ex.length === 0) return out;
   if (prepareSec > 0) {
     out.push({
       kind: 'prepare',
       durationSec: prepareSec,
-      exerciseIndex: t.exercises.indexOf(ex[0]),
+      exerciseIndex: ex[0].index,
       round: 0,
-      totalRounds: ex[0].rounds,
+      totalRounds: ex[0].e.rounds,
     });
   }
-  ex.forEach((e, i) => {
-    const exerciseIndex = t.exercises.indexOf(e);
+  ex.forEach(({ e, index: exerciseIndex }, i) => {
     for (let r = 1; r <= e.rounds; r++) {
       out.push({ kind: 'work', durationSec: e.workSec, exerciseIndex, round: r, totalRounds: e.rounds });
       const lastRound = r === e.rounds;
@@ -91,9 +94,13 @@ export const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0];
 export const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 export const DAY_LETTER = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
 
+const clamp = (n: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, n));
+
 export function parseTime(time: string): { hour: number; minute: number } {
-  const [h, m] = time.split(':').map((n) => parseInt(n, 10));
-  return { hour: Number.isFinite(h) ? h : 7, minute: Number.isFinite(m) ? m : 0 };
+  if (typeof time !== 'string') return { hour: 7, minute: 0 };
+  const m = /^(\d{1,2}):(\d{1,2})$/.exec(time.trim());
+  if (!m) return { hour: 7, minute: 0 };
+  return { hour: clamp(parseInt(m[1], 10), 0, 23), minute: clamp(parseInt(m[2], 10), 0, 59) };
 }
 
 export function formatTime(hour: number, minute: number): string {
@@ -101,7 +108,7 @@ export function formatTime(hour: number, minute: number): string {
 }
 
 export function scheduleLabel(s: Schedule | null): string | null {
-  if (!s || s.days.length === 0) return null;
+  if (!s || !Array.isArray(s.days) || s.days.length === 0) return null;
   const set = new Set(s.days);
   let days: string;
   if (set.size === 7) days = 'Daily';
@@ -112,10 +119,11 @@ export function scheduleLabel(s: Schedule | null): string | null {
 }
 
 export function nextFireTimes(s: Schedule | null, from: Date, n = 3): Date[] {
-  if (!s || s.days.length === 0) return [];
+  if (!s || !Array.isArray(s.days) || s.days.length === 0) return [];
   const { hour, minute } = parseTime(s.time);
   const out: Date[] = [];
-  for (let d = 0; d < 15 && out.length < n; d++) {
+  // 28 days: a single weekday needs 3*7 days to yield `n` dates
+  for (let d = 0; d < 28 && out.length < n; d++) {
     const c = new Date(from.getFullYear(), from.getMonth(), from.getDate() + d, hour, minute, 0, 0);
     if (s.days.includes(c.getDay()) && c.getTime() > from.getTime()) out.push(c);
   }
@@ -125,6 +133,7 @@ export function nextFireTimes(s: Schedule | null, from: Date, n = 3): Date[] {
 export function relativeDay(iso: string | undefined, now = new Date()): string {
   if (!iso) return 'Never';
   const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return 'Never';
   const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
   const days = Math.round((startOf(now) - startOf(d)) / 86400000);
   if (days <= 0) return 'Today';

@@ -9,8 +9,13 @@ import { DAY_LETTER, DAY_SHORT, WEEK_ORDER, formatTime, nextFireTimes, parseTime
 import { C, Stepper, formatDuration } from '@/lib/ui';
 import type { Exercise, Schedule, WorkoutTemplate } from '@/lib/types';
 
+/** Standard iOS header height — keep lifted content clear of it. */
+const HEADER_HEIGHT = Platform.OS === 'ios' ? 44 : 0;
+
 export default function TemplateEditor() {
-  const { id } = useLocalSearchParams<{ id?: string }>();
+  // A repeated param arrives as an array; the template id is single-valued.
+  const params = useLocalSearchParams<{ id?: string | string[] }>();
+  const id = (Array.isArray(params.id) ? params.id[0] : params.id) ?? '';
   const { getTemplate, saveTemplate, settings } = useStore();
   const existing = id ? getTemplate(id) : undefined;
 
@@ -27,11 +32,15 @@ export default function TemplateEditor() {
   );
   const [restBetweenSec, setRestBetween] = useState(existing?.restBetweenSec ?? 60);
   const [scheduleOn, setScheduleOn] = useState(!!existing?.schedule);
-  const [days, setDays] = useState<number[]>(existing?.schedule?.days ?? [1, 3, 5]);
+  // Picked days live in state as a sorted "1,3,5" key: primitive, stable identity, memo-safe.
+  const [daysKey, setDaysKey] = useState(() =>
+    [...(existing?.schedule?.days ?? [1, 3, 5])].sort((a, b) => a - b).join(','),
+  );
   const [time, setTime] = useState(existing?.schedule?.time ?? '07:00');
   const [permWarning, setPermWarning] = useState(false);
 
-  const schedule: Schedule | null = scheduleOn && days.length > 0 ? { days: [...days].sort(), time } : null;
+  const days = useMemo(() => (daysKey ? daysKey.split(',').map(Number) : []), [daysKey]);
+  const schedule = toSchedule(scheduleOn, daysKey, time);
 
   const draft: WorkoutTemplate = {
     id: existing?.id ?? 'draft',
@@ -41,8 +50,20 @@ export default function TemplateEditor() {
     schedule,
     lastDoneAt: existing?.lastDoneAt,
   };
-  const preview = useMemo(() => nextFireTimes(schedule, new Date(), 3), [scheduleOn, days.join(), time]);
-  const canSave = exercises.some((e) => e.workSec > 0 && e.rounds > 0);
+  const preview = useMemo(
+    () => nextFireTimes(toSchedule(scheduleOn, daysKey, time), new Date(), 3),
+    [scheduleOn, daysKey, time],
+  );
+  // Reminder on but no days picked would silently save without any reminder.
+  const noDays = scheduleOn && daysKey === '';
+  const canSave = !noDays && exercises.some((e) => e.workSec > 0 && e.rounds > 0);
+
+  const toggleDay = (d: number) =>
+    setDaysKey((k) => {
+      const cur = k ? k.split(',').map(Number) : [];
+      const next = cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d];
+      return next.sort((a, b) => a - b).join(',');
+    });
 
   const patchEx = (i: number, p: Partial<Exercise>) =>
     setExercises((xs) => xs.map((x, j) => (j === i ? { ...x, ...p } : x)));
@@ -55,6 +76,8 @@ export default function TemplateEditor() {
       return n;
     });
 
+  const goBack = () => (router.canGoBack() ? router.back() : router.replace('/'));
+
   const save = async () => {
     if (!canSave) return;
     const t: WorkoutTemplate = { ...draft, id: existing?.id ?? newId() };
@@ -66,19 +89,23 @@ export default function TemplateEditor() {
         return; // stay so the user sees why reminders won't fire
       }
     }
-    router.back();
+    goBack();
   };
 
   const { hour, minute } = parseTime(time);
-  const setHM = (h: number, m: number) => setTime(formatTime(((h % 24) + 24) % 24, ((m % 60) + 60) % 60));
+  const setHM = (h: number, m: number) => setTime(formatTime(wholeNumber(h) % 24, wholeNumber(m) % 60));
 
   return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+    <KeyboardAvoidingView
+      style={{ flex: 1 }}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={HEADER_HEIGHT}
+    >
       <Stack.Screen
         options={{
           title: existing ? 'Edit workout' : 'New workout',
           headerLeft: () => (
-            <Pressable onPress={() => router.back()} hitSlop={8}>
+            <Pressable onPress={goBack} hitSlop={8}>
               <Text style={s.headerBtn}>Cancel</Text>
             </Pressable>
           ),
@@ -175,7 +202,7 @@ export default function TemplateEditor() {
                     <Pressable
                       key={d}
                       style={[s.day, on && s.dayOn]}
-                      onPress={() => setDays((ds) => (on ? ds.filter((x) => x !== d) : [...ds, d]))}
+                      onPress={() => toggleDay(d)}
                       accessibilityLabel={DAY_SHORT[d]}
                       accessibilityState={{ selected: on }}
                     >
@@ -193,8 +220,8 @@ export default function TemplateEditor() {
               </Field>
               <View style={{ gap: 3 }}>
                 <Text style={s.small}>Next reminders</Text>
-                {preview.length === 0 ? (
-                  <Text style={s.preview}>Pick at least one day</Text>
+                {noDays ? (
+                  <Text style={{ color: C.prepare }}>Pick at least one day for your reminder.</Text>
                 ) : (
                   preview.map((d) => (
                     <Text key={d.toISOString()} style={s.preview}>
@@ -206,7 +233,7 @@ export default function TemplateEditor() {
               </View>
               {permWarning ? (
                 <Text style={{ color: C.danger }}>
-                  Notifications are off for this app. Saved, but reminders won't fire until you allow them in iPhone
+                  Notifications are off for this app. Saved, but reminders won&apos;t fire until you allow them in iPhone
                   Settings → Notifications.
                 </Text>
               ) : null}
@@ -217,6 +244,17 @@ export default function TemplateEditor() {
       </ScrollView>
     </KeyboardAvoidingView>
   );
+}
+
+function toSchedule(on: boolean, daysKey: string, time: string): Schedule | null {
+  const picked = daysKey ? daysKey.split(',').map(Number) : [];
+  if (!on || picked.length === 0) return null;
+  return { days: picked.sort((a, b) => a - b), time };
+}
+
+/** Guards the stepper's number-pad path: NaN would format as "NaN:NaN". */
+function wholeNumber(n: number): number {
+  return Number.isFinite(n) ? Math.trunc(n) : 0;
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
