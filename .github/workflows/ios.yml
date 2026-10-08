@@ -22,7 +22,7 @@ jobs:
     name: Build unsigned IPA
     # SDK 57 pods use iOS-26-only symbols (expo-notifications, expo-router,
     # expo-modules-core), so the macOS 15 default Xcode 16.4 cannot compile them.
-    # Xcode 26.3 is the highest 26.x installed on macos-15.
+    # Xcode 26.3 rejects expo-modules-jsi's RuntimeScheduler.h (SWIFT_RETURNS_RETAINED on a ctor); 26.2 compiles it.
     runs-on: macos-15
     timeout-minutes: 60
     steps:
@@ -40,7 +40,7 @@ jobs:
       - name: Select Xcode
         run: |
           set -euo pipefail
-          sudo xcode-select -s /Applications/Xcode_26.3.app
+          sudo xcode-select -s /Applications/Xcode_26.2.app
           xcodebuild -version
           xcodebuild -showsdks
 
@@ -70,7 +70,10 @@ jobs:
             exit 1
           fi
           WORKSPACE="${workspaces[0]}"
-          SCHEME=$(xcodebuild -list -json -workspace "$WORKSPACE" | python3 -c "import json,sys; s=[x for x in json.load(sys.stdin).get('workspace',{}).get('schemes',[]) if not x.startswith('Pods')]; print(s[0] if s else '')")
+          WS_NAME=$(basename "$WORKSPACE" .xcworkspace)
+          xcodebuild -list -json -workspace "$WORKSPACE" > "$RUNNER_TEMP/schemes.json"
+          cat "$RUNNER_TEMP/schemes.json"
+          SCHEME=$(WS_NAME="$WS_NAME" python3 -c "import json,os,sys; s=json.load(open(os.environ['RUNNER_TEMP']+'/schemes.json')).get('workspace',{}).get('schemes',[]); n=os.environ['WS_NAME']; print(n if n in s else '')")
           test -n "$SCHEME"
           echo "workspace=$WORKSPACE" >> "$GITHUB_OUTPUT"
           echo "scheme=$SCHEME" >> "$GITHUB_OUTPUT"
@@ -132,6 +135,6 @@ jobs:
           else
             gh release create "$TAG" "$IPA_PATH" \
               --title "Tabata Notebook unsigned IPA (build ${{ github.run_number }})" \
-              --notes "Unsigned IPA from ${{ github.sha }} (Expo SDK 57 / RN 0.86, Xcode 26.3, Node 22). Re-sign with a free Apple ID before sideloading; not App Store ready." \
+              --notes "Unsigned IPA from ${{ github.sha }} (Expo SDK 57 / RN 0.86, Xcode 26.2, Node 22). Re-sign with a free Apple ID before sideloading; not App Store ready." \
               --target "${{ github.sha }}"
           fi
