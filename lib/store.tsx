@@ -1,7 +1,7 @@
 // One Context + AsyncStorage. Hydrate once, write-through on every change.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { DEFAULT_SETTINGS, type Entry, type Schedule, type Settings, type WorkoutTemplate } from './types';
+import { DEFAULT_SETTINGS, type Entry, type Exercise, type Schedule, type Settings, type WorkoutTemplate } from './types';
 import { remindersSignature, syncReminders } from './notifications';
 
 const K = {
@@ -46,6 +46,14 @@ async function load<T>(key: string, fallback: T): Promise<T> {
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v);
 
+/** Corrupt durations are clamped to a sane finite number so a stored
+ *  `Infinity`/`NaN`/fraction can never produce a zero-length or frozen phase. */
+function finite(v: unknown, fallback: number, min = 0, max = 86400): number {
+  const n = typeof v === 'number' ? v : Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(n)));
+}
+
 /** Corrupt schedules become null rather than crashing the schedule helpers. */
 function sanitizeSchedule(v: unknown): Schedule | null {
   if (!isObj(v) || !Array.isArray(v.days) || typeof v.time !== 'string') return null;
@@ -61,7 +69,13 @@ function sanitizeTemplates(v: unknown): WorkoutTemplate[] {
     out.push({
       ...(raw as unknown as WorkoutTemplate),
       // Missing/non-array exercises -> empty list, template is still worth keeping.
-      exercises: (Array.isArray(raw.exercises) ? raw.exercises : []).filter(isObj) as WorkoutTemplate['exercises'],
+      exercises: (Array.isArray(raw.exercises) ? raw.exercises : []).filter(isObj).map((e) => ({
+        ...(e as unknown as Exercise),
+        workSec: finite(e.workSec, 0),
+        restSec: finite(e.restSec, 0),
+        rounds: finite(e.rounds, 0, 0, 999),
+      })),
+      restBetweenSec: finite(raw.restBetweenSec, 0),
       schedule: sanitizeSchedule(raw.schedule),
     });
   }

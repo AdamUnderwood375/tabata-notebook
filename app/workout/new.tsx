@@ -1,5 +1,5 @@
 // Template editor. /workout/new → create; /workout/new?id=<id> → edit.
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
@@ -78,9 +78,15 @@ export default function TemplateEditor() {
 
   const goBack = () => (router.canGoBack() ? router.back() : router.replace('/'));
 
+  // Minted once: a retry after a denied notification permission (or a double tap)
+  // must overwrite the same id, not create a second copy of the workout.
+  const saveId = useRef(existing?.id ?? newId());
+  const saving = useRef(false);
+
   const save = async () => {
-    if (!canSave) return;
-    const t: WorkoutTemplate = { ...draft, id: existing?.id ?? newId() };
+    if (!canSave || saving.current) return;
+    saving.current = true; // one tap = one save = one pop
+    const t: WorkoutTemplate = { ...draft, id: saveId.current };
     saveTemplate(t);
     if (t.schedule && Platform.OS !== 'web') {
       const ok = await ensurePermission();

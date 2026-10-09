@@ -41,7 +41,11 @@ jobs:
       - name: Select Xcode
         run: |
           set -euo pipefail
-          sudo xcode-select -s /Applications/Xcode_26.2.app
+          # 26.2 is the tested build; 26.3 is also covered by the expo-modules-jsi patch.
+          ls -d /Applications/Xcode_*.app >&2 || true
+          sudo xcode-select -s /Applications/Xcode_26.2.app \
+            || sudo xcode-select -s /Applications/Xcode_26.3.app \
+            || { echo "No usable Xcode 26.x on this image:"; ls -d /Applications/Xcode_*.app; exit 1; }
           xcodebuild -version
           xcodebuild -showsdks
 

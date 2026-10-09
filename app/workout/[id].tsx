@@ -139,7 +139,12 @@ export default function Runner() {
     const h = setInterval(() => {
       if (!startedAt.current || finished.current) return;
       const t = Date.now();
-      if (phases[idxRef.current]?.kind !== 'prepare') workMs.current += t - lastTick.current;
+      // Credit work time per phase rather than per tick: a background gap that
+      // started inside 'prepare' would otherwise be booked as work.
+      const delta = t - lastTick.current;
+      const inPrepare = phases[idxRef.current]?.kind === 'prepare';
+      const prepLeft = inPrepare ? Math.max(0, endsAt.current - (t - delta)) : 0;
+      workMs.current += Math.max(0, delta - prepLeft);
       lastTick.current = t;
 
       // advance (possibly several phases if we were backgrounded)
