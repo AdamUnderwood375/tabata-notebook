@@ -34,7 +34,7 @@ jobs:
         run: |
           {
             echo "ARCHIVE_PATH=$RUNNER_TEMP/app.xcarchive"
-            echo "IPA_PATH=$RUNNER_TEMP/tabata-notebook-unsigned.ipa"
+            echo "IPA_PATH=$RUNNER_TEMP/cutting-notebook-unsigned.ipa"
             echo "XCODEBUILD_LOG=$RUNNER_TEMP/xcodebuild.log"
           } >> "$GITHUB_ENV"
 
@@ -117,7 +117,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: tabata-notebook-unsigned-ipa
+          name: cutting-notebook-unsigned-ipa
           path: ${{ env.IPA_PATH }}
           if-no-files-found: error
 
@@ -139,7 +139,7 @@ jobs:
             gh release upload "$TAG" "$IPA_PATH" --clobber
           else
             gh release create "$TAG" "$IPA_PATH" \
-              --title "Tabata Notebook unsigned IPA (build ${{ github.run_number }})" \
+              --title "Cutting Notebook unsigned IPA (build ${{ github.run_number }})" \
               --notes "Unsigned IPA from ${{ github.sha }} (Expo SDK 57 / RN 0.86, Xcode 26.2, Node 22). Re-sign with a free Apple ID before sideloading; not App Store ready." \
               --target "${{ github.sha }}"
           fi

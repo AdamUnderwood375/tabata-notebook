@@ -6,7 +6,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { router, useLocalSearchParams } from 'expo-router';
 import { newId, useStore } from '@/lib/store';
-import { useCues } from '@/lib/feedback';
+import { useBackgroundAudio, useCues } from '@/lib/feedback';
 import { confirm } from '@/lib/confirm';
 import {
   buildPhases,
@@ -62,6 +62,9 @@ export default function Runner() {
   const finished = useRef(false);
   const idxRef = useRef(0);
   const isDone = status === 'done';
+
+  // Keep the clock + beeps alive with the app backgrounded / screen locked, only while running.
+  useBackgroundAudio(status === 'running' && settings.sound);
 
   // ---- keep awake ----
   useEffect(() => {

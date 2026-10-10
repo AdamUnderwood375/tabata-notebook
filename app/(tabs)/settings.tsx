@@ -10,7 +10,7 @@ export default function SettingsScreen() {
 
   const doExport = async () => {
     const json = exportJson();
-    const filename = `tabata-notebook-${new Date().toISOString().slice(0, 10)}.json`;
+    const filename = `cutting-notebook-${new Date().toISOString().slice(0, 10)}.json`;
     if (Platform.OS === 'web') {
       const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
       const a = document.createElement('a');
