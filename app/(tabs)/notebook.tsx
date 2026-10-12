@@ -1,13 +1,14 @@
 import { useMemo } from 'react';
 import { Pressable, SectionList, StyleSheet, Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { router } from 'expo-router';
+import { Tabs, router } from 'expo-router';
 import { useStore } from '@/lib/store';
+import { setsSummary } from '@/lib/sets';
 import { C, Stars, formatDuration } from '@/lib/ui';
 import type { Entry } from '@/lib/types';
 
 export default function Notebook() {
-  const { entries } = useStore();
+  const { entries, settings } = useStore();
 
   // entries are kept newest-first in the store; group by calendar month
   const sections = useMemo(() => {
@@ -28,48 +29,81 @@ export default function Notebook() {
   const open = (id: string) => router.push(`/entry/${id}`);
 
   return (
-    <SectionList
-      style={s.screen}
-      sections={sections}
-      keyExtractor={(e) => e.id}
-      stickySectionHeadersEnabled
-      contentContainerStyle={{ paddingBottom: 32, flexGrow: 1 }}
-      ListEmptyComponent={
-        <View style={s.empty}>
-          <Ionicons name="book-outline" size={48} color={C.faint} />
-          <Text style={s.emptyTitle}>Nothing logged yet</Text>
-          <Text style={s.emptyText}>Finish (or bail on) a workout and it lands here automatically.</Text>
-        </View>
-      }
-      renderSectionHeader={({ section }) => <Text style={s.month}>{section.title}</Text>}
-      renderItem={({ item: e }) => {
-        const d = new Date(e.startedAt);
-        return (
-          <Pressable style={({ pressed }) => [s.row, pressed && { backgroundColor: C.cardHi }]} onPress={() => open(e.id)}>
-            <View style={s.dateCol}>
-              <Text style={s.dow}>{d.toLocaleDateString(undefined, { weekday: 'short' })}</Text>
-              <Text style={s.dom}>{d.getDate()}</Text>
-              <Text style={s.tod}>{d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</Text>
-            </View>
-            <View style={{ flex: 1, gap: 5 }}>
-              <View style={s.headLine}>
-                <Text style={s.name} numberOfLines={1}>
-                  {e.name}
-                </Text>
-                <Text style={s.dur}>
-                  {formatDuration(e.actualSec)}
-                  {e.completed ? '' : ' · partial'}
-                </Text>
+    <>
+      <Tabs.Screen
+        options={{
+          headerLeft: () => (
+            <Pressable
+              style={{ marginLeft: 16 }}
+              hitSlop={8}
+              accessibilityLabel="Log past workout"
+              onPress={() => router.push('/entry/log')}
+            >
+              <Ionicons name="add" size={26} color={C.accent} />
+            </Pressable>
+          ),
+        }}
+      />
+      <SectionList
+        style={s.screen}
+        sections={sections}
+        keyExtractor={(e) => e.id}
+        stickySectionHeadersEnabled
+        contentContainerStyle={{ paddingBottom: 32, flexGrow: 1 }}
+        ListEmptyComponent={
+          <View style={s.empty}>
+            <Ionicons name="book-outline" size={48} color={C.faint} />
+            <Text style={s.emptyTitle}>Nothing logged yet</Text>
+            <Text style={s.emptyText}>
+              Finish (or bail on) a workout and it lands here automatically. Or tap + to log one you did elsewhere.
+            </Text>
+          </View>
+        }
+        renderSectionHeader={({ section }) => <Text style={s.month}>{section.title}</Text>}
+        renderItem={({ item: e }) => {
+          const d = new Date(e.startedAt);
+          const did = exSummary(e, settings.units);
+          return (
+            <Pressable style={({ pressed }) => [s.row, pressed && { backgroundColor: C.cardHi }]} onPress={() => open(e.id)}>
+              <View style={s.dateCol}>
+                <Text style={s.dow}>{d.toLocaleDateString(undefined, { weekday: 'short' })}</Text>
+                <Text style={s.dom}>{d.getDate()}</Text>
+                <Text style={s.tod}>{d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</Text>
               </View>
-              <Stars value={e.qHowStars} size={15} />
-              <Answer label="Did" text={e.qWhat} />
-              <Answer label="Notes" text={e.qHowNotes} />
-            </View>
-          </Pressable>
-        );
-      }}
-    />
+              <View style={{ flex: 1, gap: 5 }}>
+                <View style={s.headLine}>
+                  <Text style={s.name} numberOfLines={1}>
+                    {e.name}
+                  </Text>
+                  <Text style={s.dur}>
+                    {formatDuration(e.actualSec)}
+                    {e.completed ? '' : ' · partial'}
+                    {e.manual ? ' · logged' : ''}
+                  </Text>
+                </View>
+                <Stars value={e.qHowStars} size={15} />
+                <Answer label="Did" text={e.qWhat} />
+                <Answer label="Notes" text={e.qHowNotes} />
+                {did ? (
+                  <Text style={s.answer} numberOfLines={2}>
+                    {did}
+                  </Text>
+                ) : null}
+              </View>
+            </Pressable>
+          );
+        }}
+        />
+      </>
   );
+}
+
+/** "Bench 3×10 @ 60kg · Pull-ups 3×8" — one line of what was actually done. */
+function exSummary(e: Entry, units: string): string {
+  return (e.exercises ?? [])
+    .map((x) => `${x.name.trim()} ${setsSummary(x.sets, units)}`.trim())
+    .filter(Boolean)
+    .join(' · ');
 }
 
 /** Inline answer; a dash when unanswered (the whole row is tappable to fill it in). */

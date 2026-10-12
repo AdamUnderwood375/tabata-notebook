@@ -5,10 +5,13 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useStore } from '@/lib/store';
 import { confirm } from '@/lib/confirm';
+import { SetsEditor } from '@/lib/sets';
 import { C, Stars, formatDuration } from '@/lib/ui';
-import type { Entry } from '@/lib/types';
+import type { Entry, ExerciseLog } from '@/lib/types';
 
-type Draft = Pick<Entry, 'qWhat' | 'qHowStars' | 'qHowNotes'>;
+type Draft = Pick<Entry, 'qWhat' | 'qHowStars' | 'qHowNotes'> & { exercises: ExerciseLog[] };
+
+const copyLogs = (logs: ExerciseLog[]): ExerciseLog[] => logs.map((x) => ({ ...x, sets: x.sets.map((y) => ({ ...y })) }));
 
 /** Standard iOS header height — keep lifted content clear of it. */
 const HEADER_HEIGHT = Platform.OS === 'ios' ? 44 : 0;
@@ -18,7 +21,7 @@ export default function EntryScreen() {
   const params = useLocalSearchParams<{ id?: string | string[]; fresh?: string | string[] }>();
   const id = (Array.isArray(params.id) ? params.id[0] : params.id) ?? '';
   const fresh = Array.isArray(params.fresh) ? params.fresh[0] : params.fresh;
-  const { getEntry, getTemplate, updateEntry, deleteEntry } = useStore();
+  const { getEntry, getTemplate, updateEntry, deleteEntry, settings } = useStore();
   const entry = getEntry(id);
   const template = entry ? getTemplate(entry.templateId) : undefined;
 
@@ -26,6 +29,7 @@ export default function EntryScreen() {
     qWhat: entry?.qWhat ?? '',
     qHowStars: entry?.qHowStars ?? null,
     qHowNotes: entry?.qHowNotes ?? '',
+    exercises: copyLogs(entry?.exercises ?? []),
   }));
   const [saved, setSaved] = useState(true);
 
@@ -123,6 +127,7 @@ export default function EntryScreen() {
                 color={C.prepare}
               />
             )}
+            {entry.manual ? <Pill icon="create-outline" text="Logged manually" /> : null}
           </View>
         </View>
 
@@ -134,7 +139,71 @@ export default function EntryScreen() {
         ) : null}
 
         <View style={s.q}>
-          <Text style={s.qLabel}>What did you do?</Text>
+          <Text style={s.qLabel}>Exercises</Text>
+          {draft.exercises.map((x, i) => (
+            <View key={i} style={s.exCard}>
+              <View style={s.exHead}>
+                <TextInput
+                  style={[s.input, s.exName]}
+                  value={x.name}
+                  onChangeText={(v) => {
+                    const next = copyLogs(draft.exercises);
+                    next[i].name = v;
+                    change({ exercises: next });
+                  }}
+                  onBlur={flush}
+                  placeholder="Exercise"
+                  placeholderTextColor={C.faint}
+                  accessibilityLabel={`Exercise ${i + 1} name`}
+                />
+                <Pressable
+                  hitSlop={8}
+                  onPress={() => change({ exercises: draft.exercises.filter((_, j) => j !== i) }, true)}
+                  accessibilityLabel={`Remove exercise ${x.name || i + 1}`}
+                >
+                  <Ionicons name="trash-outline" size={18} color={C.danger} />
+                </Pressable>
+              </View>
+              <TextInput
+                style={[s.input, { minHeight: 56 }]}
+                multiline
+                value={x.notes}
+                onChangeText={(v) => {
+                  const next = copyLogs(draft.exercises);
+                  next[i].notes = v;
+                  change({ exercises: next });
+                }}
+                onBlur={flush}
+                placeholder="Description / how it went"
+                placeholderTextColor={C.faint}
+                textAlignVertical="top"
+                accessibilityLabel={`Exercise ${i + 1} description`}
+              />
+              <SetsEditor
+                sets={x.sets}
+                units={settings.units}
+                onChange={(sets) => {
+                  const next = copyLogs(draft.exercises);
+                  next[i].sets = sets;
+                  change({ exercises: next }, true);
+                }}
+              />
+            </View>
+          ))}
+          <Pressable
+            style={s.addEx}
+            onPress={() =>
+              change({ exercises: [...copyLogs(draft.exercises), { name: '', notes: '', sets: [{ reps: 10, weight: null }] }] }, true)
+            }
+            accessibilityLabel="Add exercise"
+          >
+            <Ionicons name="add" size={18} color={C.accent} />
+            <Text style={{ color: C.accent, fontWeight: '600', fontSize: 15 }}>Add exercise</Text>
+          </Pressable>
+        </View>
+
+        <View style={s.q}>
+          <Text style={s.qLabel}>{draft.exercises.length > 0 ? 'Anything else?' : 'What did you do?'}</Text>
           <TextInput
             style={[s.input, { minHeight: 70 }]}
             multiline
@@ -212,6 +281,20 @@ const s = StyleSheet.create({
   },
   repeatText: { color: '#fff', fontSize: 18, fontWeight: '800' },
   q: { gap: 8 },
+  exCard: { backgroundColor: C.card, borderRadius: 12, padding: 12, gap: 8 },
+  exHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  exName: { flex: 1 },
+  addEx: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: C.accent,
+    borderRadius: 12,
+    paddingVertical: 12,
+  },
   qLabel: { color: C.text, fontSize: 18, fontWeight: '700' },
   input: {
     backgroundColor: C.card,

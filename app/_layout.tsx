@@ -69,6 +69,7 @@ function Root() {
         name="workout/[id]"
         options={{ headerShown: false, gestureEnabled: false, presentation: 'fullScreenModal', animation: 'fade' }}
       />
+      <Stack.Screen name="entry/log" options={{ title: 'Log past workout', presentation: 'modal' }} />
       <Stack.Screen name="entry/[id]" options={{ title: 'Entry' }} />
     </Stack>
   );
