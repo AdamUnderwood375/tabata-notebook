@@ -107,7 +107,13 @@ function sanitizeEntries(v: unknown): Entry[] {
   if (!Array.isArray(v)) return [];
   return v
     .filter((raw): raw is Entry => isObj(raw) && typeof raw.id === 'string' && !!raw.id)
-    .map((raw) => ({ ...raw, exercises: sanitizeLogs(raw.exercises) }))
+    .map((raw) => ({
+      ...raw,
+      name: typeof raw.name === 'string' ? raw.name : 'Workout',
+      qWhat: typeof raw.qWhat === 'string' ? raw.qWhat : '',
+      qHowNotes: typeof raw.qHowNotes === 'string' ? raw.qHowNotes : '',
+      exercises: sanitizeLogs(raw.exercises),
+    }))
     .sort((a, b) => String(b.startedAt ?? '').localeCompare(String(a.startedAt ?? '')));
 }
 
@@ -193,7 +199,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ...src,
         id: newId(),
         name: `${src.name} copy`,
-        exercises: src.exercises.map((e) => ({ ...e })),
+        exercises: src.exercises.map((e) => ({ ...e, sets: e.sets?.map((x) => ({ ...x })) })),
         schedule: null, // a copy shouldn't double-fire the original's reminders
         lastDoneAt: undefined,
       };
@@ -229,13 +235,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const updateEntry = useCallback((id: string, patch: Partial<Entry>) => {
-    setEntries((prev) => {
-      const next = prev.map((e) => (e.id === id ? { ...e, ...patch, id } : e));
-      // Editing the date of a manual entry can move it.
-      return patch.startedAt
-        ? next.sort((a, b) => String(b.startedAt ?? '').localeCompare(String(a.startedAt ?? '')))
-        : next;
-    });
+    setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch, id } : e)));
   }, []);
 
   const deleteEntry = useCallback((id: string) => {

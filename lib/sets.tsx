@@ -1,6 +1,7 @@
 // Shared sets × reps (× weight) editor + helpers. Used by the template editor,
 // the entry screen and the "log past workout" form. Not a route.
 import Ionicons from '@expo/vector-icons/Ionicons';
+import { useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { C } from './ui';
 import type { Exercise, ExerciseLog, SetLog } from './types';
@@ -20,6 +21,11 @@ export function setsSummary(sets: SetLog[] | undefined, units: string): string {
 /** Template exercises → editable logs (targets become the starting "done" values). */
 export function logsFromExercises(exs: Exercise[]): ExerciseLog[] {
   return exs.map((e) => ({ name: e.name, notes: e.notes ?? '', sets: (e.sets ?? []).map((x) => ({ ...x })) }));
+}
+
+/** Deep copy so edits never share nested set arrays with stored data. */
+export function copyLogs(logs: ExerciseLog[]): ExerciseLog[] {
+  return logs.map((x) => ({ ...x, sets: x.sets.map((y) => ({ ...y })) }));
 }
 
 /** Parse a decimal weight field; blank → null (bodyweight). */
@@ -69,16 +75,7 @@ export function SetsEditor({
             accessibilityLabel={`Set ${i + 1} reps`}
           />
           {showWeight ? (
-            <TextInput
-              style={[st.input, st.colNum]}
-              keyboardType="decimal-pad"
-              defaultValue={x.weight != null ? String(x.weight) : ''}
-              placeholder="BW"
-              placeholderTextColor={C.faint}
-              selectTextOnFocus
-              onChangeText={(t) => patch(i, { weight: parseWeight(t) })}
-              accessibilityLabel={`Set ${i + 1} weight`}
-            />
+            <WeightInput index={i} value={x.weight} onChange={(w) => patch(i, { weight: w })} />
           ) : null}
           <Pressable style={st.colDel} hitSlop={6} onPress={() => remove(i)} accessibilityLabel={`Remove set ${i + 1}`}>
             <Ionicons name="close-circle-outline" size={20} color={C.faint} />
@@ -90,6 +87,28 @@ export function SetsEditor({
         <Text style={{ color: C.accent, fontWeight: '600', fontSize: 14 }}>Add set</Text>
       </Pressable>
     </View>
+  );
+}
+
+/** Controlled decimal field. Keeps the raw text locally so "62." survives while typing,
+ *  but re-syncs whenever the stored value changes underneath it (e.g. a set above was removed). */
+function WeightInput({ index, value, onChange }: { index: number; value: number | null; onChange: (w: number | null) => void }) {
+  const [text, setText] = useState(value != null ? String(value) : '');
+  if (parseWeight(text) !== value) setText(value != null ? String(value) : ''); // render-phase sync, React-approved pattern
+  return (
+    <TextInput
+      style={[st.input, st.colNum]}
+      keyboardType="decimal-pad"
+      value={text}
+      placeholder="BW"
+      placeholderTextColor={C.faint}
+      selectTextOnFocus
+      onChangeText={(t) => {
+        setText(t);
+        onChange(parseWeight(t));
+      }}
+      accessibilityLabel={`Set ${index + 1} weight`}
+    />
   );
 }
 
