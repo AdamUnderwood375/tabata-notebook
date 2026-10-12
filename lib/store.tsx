@@ -1,7 +1,7 @@
 // One Context + AsyncStorage. Hydrate once, write-through on every change.
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { DEFAULT_SETTINGS, type Entry, type Exercise, type Schedule, type Settings, type WorkoutTemplate } from './types';
+import { DEFAULT_SETTINGS, type Entry, type Exercise, type ExerciseLog, type Schedule, type SetLog, type Settings, type WorkoutTemplate } from './types';
 import { remindersSignature, syncReminders } from './notifications';
 
 const K = {
@@ -54,6 +54,24 @@ function finite(v: unknown, fallback: number, min = 0, max = 86400): number {
   return Math.min(max, Math.max(min, Math.round(n)));
 }
 
+/** Corrupt set lists become []; weight stays null (bodyweight) unless a finite number. */
+export function sanitizeSets(v: unknown): SetLog[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter(isObj).map((x) => ({
+    reps: finite(x.reps, 0, 0, 9999),
+    weight: typeof x.weight === 'number' && Number.isFinite(x.weight) ? Math.max(0, x.weight) : null,
+  }));
+}
+
+function sanitizeLogs(v: unknown): ExerciseLog[] | undefined {
+  if (!Array.isArray(v)) return undefined;
+  return v.filter(isObj).map((x) => ({
+    name: typeof x.name === 'string' ? x.name : '',
+    notes: typeof x.notes === 'string' ? x.notes : '',
+    sets: sanitizeSets(x.sets),
+  }));
+}
+
 /** Corrupt schedules become null rather than crashing the schedule helpers. */
 function sanitizeSchedule(v: unknown): Schedule | null {
   if (!isObj(v) || !Array.isArray(v.days) || typeof v.time !== 'string') return null;
@@ -74,6 +92,8 @@ function sanitizeTemplates(v: unknown): WorkoutTemplate[] {
         workSec: finite(e.workSec, 0),
         restSec: finite(e.restSec, 0),
         rounds: finite(e.rounds, 0, 0, 999),
+        notes: typeof e.notes === 'string' ? e.notes : undefined,
+        sets: sanitizeSets(e.sets),
       })),
       restBetweenSec: finite(raw.restBetweenSec, 0),
       schedule: sanitizeSchedule(raw.schedule),
@@ -87,6 +107,7 @@ function sanitizeEntries(v: unknown): Entry[] {
   if (!Array.isArray(v)) return [];
   return v
     .filter((raw): raw is Entry => isObj(raw) && typeof raw.id === 'string' && !!raw.id)
+    .map((raw) => ({ ...raw, exercises: sanitizeLogs(raw.exercises) }))
     .sort((a, b) => String(b.startedAt ?? '').localeCompare(String(a.startedAt ?? '')));
 }
 
@@ -193,12 +214,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addEntry = useCallback((e: Entry) => {
-    setEntries((prev) => [e, ...prev.filter((x) => x.id !== e.id)]);
-    setTemplates((prev) => prev.map((t) => (t.id === e.templateId ? { ...t, lastDoneAt: e.endedAt } : t)));
+    // Past workouts can be logged by hand, so keep the list sorted rather than prepending.
+    setEntries((prev) =>
+      [e, ...prev.filter((x) => x.id !== e.id)].sort((a, b) =>
+        String(b.startedAt ?? '').localeCompare(String(a.startedAt ?? '')),
+      ),
+    );
+    // A backdated entry must not make "Last done" go backwards.
+    setTemplates((prev) =>
+      prev.map((t) =>
+        t.id === e.templateId && (!t.lastDoneAt || e.endedAt > t.lastDoneAt) ? { ...t, lastDoneAt: e.endedAt } : t,
+      ),
+    );
   }, []);
 
   const updateEntry = useCallback((id: string, patch: Partial<Entry>) => {
-    setEntries((prev) => prev.map((e) => (e.id === id ? { ...e, ...patch, id } : e)));
+    setEntries((prev) => {
+      const next = prev.map((e) => (e.id === id ? { ...e, ...patch, id } : e));
+      // Editing the date of a manual entry can move it.
+      return patch.startedAt
+        ? next.sort((a, b) => String(b.startedAt ?? '').localeCompare(String(a.startedAt ?? '')))
+        : next;
+    });
   }, []);
 
   const deleteEntry = useCallback((id: string) => {

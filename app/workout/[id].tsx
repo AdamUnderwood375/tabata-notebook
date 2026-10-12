@@ -7,6 +7,7 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { router, useLocalSearchParams } from 'expo-router';
 import { newId, useStore } from '@/lib/store';
 import { useBackgroundAudio, useCues } from '@/lib/feedback';
+import { logsFromExercises } from '@/lib/sets';
 import { confirm } from '@/lib/confirm';
 import {
   buildPhases,
@@ -115,6 +116,8 @@ export default function Runner() {
         qWhat: '',
         qHowStars: null,
         qHowNotes: '',
+        // Planned sets/reps become the starting log; adjust on the entry screen.
+        exercises: logsFromExercises(template.exercises),
       };
       addEntry(entry);
       router.replace({ pathname: '/entry/[id]', params: { id: entry.id, fresh: '1' } });
