@@ -7,6 +7,7 @@ import { newId, useStore } from '@/lib/store';
 import { ensurePermission } from '@/lib/notifications';
 import { DAY_LETTER, DAY_SHORT, WEEK_ORDER, formatTime, nextFireTimes, parseTime, totalSec } from '@/lib/timer';
 import { C, Stepper, formatDuration } from '@/lib/ui';
+import { SetsEditor } from '@/lib/sets';
 import type { Exercise, Schedule, WorkoutTemplate } from '@/lib/types';
 
 /** Standard iOS header height — keep lifted content clear of it. */
@@ -24,6 +25,8 @@ export default function TemplateEditor() {
     workSec: settings.defaultWorkSec,
     restSec: settings.defaultRestSec,
     rounds: settings.defaultRounds,
+    notes: '',
+    sets: [],
   });
 
   const [name, setName] = useState(existing?.name ?? '');
@@ -45,7 +48,12 @@ export default function TemplateEditor() {
   const draft: WorkoutTemplate = {
     id: existing?.id ?? 'draft',
     name: name.trim() || 'Untitled workout',
-    exercises: exercises.map((e, i) => ({ ...e, name: e.name.trim() || `Exercise ${i + 1}` })),
+    exercises: exercises.map((e, i) => ({
+      ...e,
+      name: e.name.trim() || `Exercise ${i + 1}`,
+      notes: (e.notes ?? '').trim(),
+      sets: (e.sets ?? []).filter((x) => x.reps > 0),
+    })),
     restBetweenSec,
     schedule,
     lastDoneAt: existing?.lastDoneAt,
@@ -167,6 +175,15 @@ export default function TemplateEditor() {
                   <Ionicons name="trash-outline" size={19} color={exercises.length === 1 ? C.border : C.danger} />
                 </Pressable>
               </View>
+              <TextInput
+                style={[s.input, { fontSize: 15, minHeight: 44 }]}
+                value={e.notes ?? ''}
+                onChangeText={(v) => patchEx(i, { notes: v })}
+                placeholder="Description \u2014 e.g. slow negatives, wide grip"
+                placeholderTextColor={C.faint}
+                multiline
+                textAlignVertical="top"
+              />
               <Field label="Work">
                 <Stepper value={e.workSec} onChange={(v) => patchEx(i, { workSec: v })} min={1} step={5} suffix="s" />
               </Field>
@@ -176,6 +193,8 @@ export default function TemplateEditor() {
               <Field label="Rounds">
                 <Stepper value={e.rounds} onChange={(v) => patchEx(i, { rounds: v })} min={1} max={99} step={1} />
               </Field>
+              <Text style={s.small}>Sets \u00d7 reps</Text>
+              <SetsEditor sets={e.sets ?? []} onChange={(v) => patchEx(i, { sets: v })} units={settings.units} />
             </View>
           ))}
           <Pressable style={s.addBtn} onPress={() => setExercises((xs) => [...xs, blankExercise()])}>
