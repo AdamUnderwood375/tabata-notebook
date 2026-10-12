@@ -14,7 +14,7 @@ import {
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, router } from 'expo-router';
 import { newId, useStore } from '@/lib/store';
-import { SetsEditor, logsFromExercises } from '@/lib/sets';
+import { SetsEditor, copyLogs, logsFromExercises } from '@/lib/sets';
 import { totalSec } from '@/lib/timer';
 import { C, Stars, Stepper } from '@/lib/ui';
 import type { Entry, ExerciseLog, Stars as StarsT, WorkoutTemplate } from '@/lib/types';
@@ -23,9 +23,6 @@ import type { Entry, ExerciseLog, Stars as StarsT, WorkoutTemplate } from '@/lib
 const HEADER_HEIGHT = Platform.OS === 'ios' ? 44 : 0;
 
 const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-
-const copyLogs = (logs: ExerciseLog[]): ExerciseLog[] =>
-  logs.map((x) => ({ ...x, sets: x.sets.map((y) => ({ ...y })) }));
 
 export default function LogPastWorkout() {
   const { templates, settings, addEntry } = useStore();
@@ -63,7 +60,7 @@ export default function LogPastWorkout() {
     return new Date(d.getFullYear(), d.getMonth(), d.getDate() + dayOffset, hour, minute, 0, 0);
   };
   const shiftDay = (n: number) => setWhen((w) => atFrom(w, n));
-  const jumpDay = (n: number) => setWhen(at(n, when.getHours(), when.getMinutes()));
+  const jumpDay = (n: number) => setWhen((w) => at(n, w.getHours(), w.getMinutes()));
   const setHM = (h: number, m: number) => setWhen((w) => atFrom(w, 0, h, m));
 
   const now = new Date();
@@ -77,23 +74,31 @@ export default function LogPastWorkout() {
   const save = () => {
     if (!canSave || saving.current) return;
     saving.current = true; // one tap = one entry = one navigation
-    const now = new Date();
-    const started = when.getTime() > now.getTime() ? now : when; // never log a future start
+    const stamp = new Date();
+    const started = when.getTime() > stamp.getTime() ? stamp : when; // never log a future start
+    const actualSec = min * 60;
+    const template = templates.find((t) => t.id === templateId);
+    // Always plan longer than actual unless the whole thing was finished — "stopped early" must never read 100%.
+    const plannedSec = Math.max(
+      template ? totalSec(template) : 0,
+      completed ? actualSec : Math.round(actualSec * 1.25)
+    );
     const entry: Entry = {
       id: newId(),
       templateId,
       name: name.trim(),
       startedAt: started.toISOString(),
       endedAt: new Date(started.getTime() + min * 60000).toISOString(),
-      plannedSec: min * 60,
-      actualSec: min * 60,
+      plannedSec,
+      actualSec,
       completed,
       qWhat,
       qHowStars: stars,
       qHowNotes,
       exercises: exercises
-        .filter((x) => x.name.trim() !== '' || x.sets.length > 0)
-        .map((x) => ({ name: x.name.trim(), notes: x.notes.trim(), sets: x.sets.filter((y) => y.reps > 0) })),
+        .map((x) => ({ name: x.name.trim(), notes: x.notes.trim(), sets: x.sets.filter((y) => y.reps > 0) }))
+        // clean up first, then keep what still says something
+        .filter((x) => x.name !== '' || x.sets.length > 0),
       manual: true,
     };
     addEntry(entry);

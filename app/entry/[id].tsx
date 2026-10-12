@@ -5,13 +5,11 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Stack, router, useLocalSearchParams } from 'expo-router';
 import { useStore } from '@/lib/store';
 import { confirm } from '@/lib/confirm';
-import { SetsEditor } from '@/lib/sets';
+import { SetsEditor, copyLogs } from '@/lib/sets';
 import { C, Stars, formatDuration } from '@/lib/ui';
 import type { Entry, ExerciseLog } from '@/lib/types';
 
 type Draft = Pick<Entry, 'qWhat' | 'qHowStars' | 'qHowNotes'> & { exercises: ExerciseLog[] };
-
-const copyLogs = (logs: ExerciseLog[]): ExerciseLog[] => logs.map((x) => ({ ...x, sets: x.sets.map((y) => ({ ...y })) }));
 
 /** Standard iOS header height — keep lifted content clear of it. */
 const HEADER_HEIGHT = Platform.OS === 'ios' ? 44 : 0;
@@ -32,6 +30,16 @@ export default function EntryScreen() {
     exercises: copyLogs(entry?.exercises ?? []),
   }));
   const [saved, setSaved] = useState(true);
+  const [loadedFor, setLoadedFor] = useState(entry ? id : '');
+  if (entry && loadedFor !== id) {
+    setLoadedFor(id);
+    setDraft({
+      qWhat: entry.qWhat ?? '',
+      qHowStars: entry.qHowStars ?? null,
+      qHowNotes: entry.qHowNotes ?? '',
+      exercises: copyLogs(entry.exercises ?? []),
+    });
+  }
 
   // ---- autosave: debounce while typing, flush on leave ----
   const pending = useRef<Draft | null>(null);
@@ -55,6 +63,17 @@ export default function EntryScreen() {
   const change = (p: Partial<Draft>, immediate = false) => {
     setDraft((d) => {
       const next = { ...d, ...p };
+      pending.current = next;
+      return next;
+    });
+    setSaved(false);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => flushRef.current(), immediate ? 0 : 500);
+  };
+
+  const changeEx = (fn: (xs: ExerciseLog[]) => ExerciseLog[], immediate = false) => {
+    setDraft((d) => {
+      const next = { ...d, exercises: fn(d.exercises) };
       pending.current = next;
       return next;
     });
@@ -146,11 +165,7 @@ export default function EntryScreen() {
                 <TextInput
                   style={[s.input, s.exName]}
                   value={x.name}
-                  onChangeText={(v) => {
-                    const next = copyLogs(draft.exercises);
-                    next[i].name = v;
-                    change({ exercises: next });
-                  }}
+                  onChangeText={(v) => changeEx((xs) => xs.map((x, j) => (j === i ? { ...x, name: v } : x)))}
                   onBlur={flush}
                   placeholder="Exercise"
                   placeholderTextColor={C.faint}
@@ -158,7 +173,7 @@ export default function EntryScreen() {
                 />
                 <Pressable
                   hitSlop={8}
-                  onPress={() => change({ exercises: draft.exercises.filter((_, j) => j !== i) }, true)}
+                  onPress={() => changeEx((xs) => xs.filter((_, j) => j !== i), true)}
                   accessibilityLabel={`Remove exercise ${x.name || i + 1}`}
                 >
                   <Ionicons name="trash-outline" size={18} color={C.danger} />
@@ -168,11 +183,7 @@ export default function EntryScreen() {
                 style={[s.input, { minHeight: 56 }]}
                 multiline
                 value={x.notes}
-                onChangeText={(v) => {
-                  const next = copyLogs(draft.exercises);
-                  next[i].notes = v;
-                  change({ exercises: next });
-                }}
+                onChangeText={(v) => changeEx((xs) => xs.map((x, j) => (j === i ? { ...x, notes: v } : x)))}
                 onBlur={flush}
                 placeholder="Description / how it went"
                 placeholderTextColor={C.faint}
@@ -182,18 +193,14 @@ export default function EntryScreen() {
               <SetsEditor
                 sets={x.sets}
                 units={settings.units}
-                onChange={(sets) => {
-                  const next = copyLogs(draft.exercises);
-                  next[i].sets = sets;
-                  change({ exercises: next }, true);
-                }}
+                onChange={(sets) => changeEx((xs) => xs.map((x, j) => (j === i ? { ...x, sets } : x)), true)}
               />
             </View>
           ))}
           <Pressable
             style={s.addEx}
             onPress={() =>
-              change({ exercises: [...copyLogs(draft.exercises), { name: '', notes: '', sets: [{ reps: 10, weight: null }] }] }, true)
+              changeEx((xs) => [...xs, { name: '', notes: '', sets: [{ reps: 10, weight: null }] }], true)
             }
             accessibilityLabel="Add exercise"
           >

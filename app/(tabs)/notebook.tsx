@@ -34,8 +34,9 @@ export default function Notebook() {
         options={{
           headerLeft: () => (
             <Pressable
-              style={{ marginLeft: 16 }}
-              hitSlop={8}
+              style={{ paddingHorizontal: 8 }}
+              hitSlop={12}
+              accessibilityRole="button"
               accessibilityLabel="Log past workout"
               onPress={() => router.push('/entry/log')}
             >
@@ -82,13 +83,9 @@ export default function Notebook() {
                   </Text>
                 </View>
                 <Stars value={e.qHowStars} size={15} />
+                {did ? <Answer label="Sets" text={did} /> : null}
                 <Answer label="Did" text={e.qWhat} />
                 <Answer label="Notes" text={e.qHowNotes} />
-                {did ? (
-                  <Text style={s.answer} numberOfLines={2}>
-                    {did}
-                  </Text>
-                ) : null}
               </View>
             </Pressable>
           );
